@@ -1,22 +1,29 @@
-# Decisiones (ADR)
+# Architecture decisions (ADR)
 
-Un archivo por decisión difícil de deshacer: `NNNN-titulo-corto.md` (`0001-stack.md`, `0002-modelo-de-datos.md`…).
-
-Formato:
+One file per decision that is hard to undo: `NNNN-short-title.md`.
 
 ```markdown
-# NNNN. Título
+# NNNN. Title
 
-Fecha: YYYY-MM-DD · Estado: aceptada | sustituida por NNNN
+Date: YYYY-MM-DD · Status: accepted | superseded by NNNN
 
-## Contexto
-Qué problema había y qué restricciones.
+## Context
+The problem and its constraints.
 
-## Decisión
-Qué se eligió.
+## Decision
+What was chosen.
 
-## Consecuencias
-Qué ganamos, qué perdemos y qué habrá que vigilar.
+## Consequences
+What we gain, what we lose and what to watch.
 ```
 
-Las razones las da quien decide; nunca se inventan a posteriori.
+The reasons come from whoever decides; they are never made up afterwards.
+
+| ADR | Decision |
+|---|---|
+| [0001](0001-native-tool-use.md) | Actions are native tool calls, bridged through MCP for the Claude Code provider |
+| [0002](0002-always-confirm-with-preview.md) | Every action on the user's behalf needs confirmation; public ones come with a preview image |
+| [0003](0003-web-on-fastapi-with-magic-links.md) | One FastAPI server for the webhook and the web, reached through a magic link sent on WhatsApp |
+| [0004](0004-sqlite-and-os-keychain.md) | SQLite for agent state, the OS keychain for connection secrets |
+| [0005](0005-facts-come-from-data.md) | Facts and numbers come from data; reach estimates are computed from the user's own history |
+| [0006](0006-hybrid-access-api-first.md) | Official APIs for acting; the user's browser session only for read-only gaps, opt-in per network |
