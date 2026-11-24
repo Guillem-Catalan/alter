@@ -1,0 +1,21 @@
+# Copied into every new project by `dev new project`.
+.DS_Store
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+.claude/worktrees/
+node_modules/
+dist/
+build/
+.next/
+.vercel/
+.turbo/
+__pycache__/
+.venv/
+*.log
+
+# Alter: personal data lives outside the repo (see README), but never commit it if DATA_DIR points here
+data/
+# Local editor workflow
+.vscode/
