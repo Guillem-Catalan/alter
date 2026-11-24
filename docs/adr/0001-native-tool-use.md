@@ -18,7 +18,7 @@ OpenAI-compatible API, and Claude Code on the user's own subscription.
 Every capability is a **tool** with a name, a description and a JSON schema, defined once in a tool registry.
 Provider adapters expose the same registry:
 
-- Anthropic and Azure: native `tool_use`, with `strict: true` schemas.
+- Anthropic and Azure: native `tool_use`.
 - OpenAI-compatible: function calling.
 - Claude Code: Alter starts a small local MCP server (stdio) with the same tools and passes it to `claude -p`
   with `--mcp-config` and `--strict-mcp-config`; Claude Code's built-in tools stay disabled (`--tools ""`).
@@ -29,7 +29,8 @@ The existing tags become tools (`load_skill`, `create_file`, `remember_preferenc
 The user chose this option for reliability.
 
 ## Consequences
-- Arguments are validated against a schema before anything runs.
+- Arguments are validated in code against the tool's schema before anything runs, the same way for every
+  provider; invalid calls go back to the model as errors so it can retry.
 - One tool definition serves every provider; adding a connector means adding tools, not prompt syntax.
 - More code than tags: an adapter per provider and an MCP server for Claude Code (adds the `mcp` package).
 - Tool results go back to the model in the same turn, so reading (a meeting, an inbox) works in one exchange.

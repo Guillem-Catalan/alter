@@ -1,57 +1,81 @@
 import unittest
 
 from agent.brain import split_drafts
+from agent.files import ingest
+from agent.llm import Turn, UsageLimitError
 from agent.store import UserStore
+from agent.tools import ToolCall
 
-from tests.helpers import make_agent
+from tests.helpers import call, make_agent
 
-SETUP_REPLY = "[SETUP: Ana | @ana on X | Builds a CRM]Nice to meet you, Ana!"
+SETUP = [call("set_profile", name="Ana", handles="@ana on X", context="Builds a CRM"), "Nice to meet you, Ana!"]
 
 
 class AgentTest(unittest.TestCase):
-    def start(self, *replies, **kwargs):
-        agent, llm, tmp = make_agent(SETUP_REPLY, *replies, **kwargs)
+    def start(self, *turns, **kwargs):
+        agent, llm, tmp = make_agent(*SETUP, *turns, **kwargs)
         self.addCleanup(tmp.cleanup)
+        self.addCleanup(agent.db.close)
         self.assertIn("TestBot", agent.handle("u1", "hi").text)  # welcome message, no model call
         self.assertEqual(llm.calls, [])
         self.assertEqual(agent.handle("u1", "I'm Ana, @ana, building a CRM").text, "Nice to meet you, Ana!")
         self.store = UserStore(agent.data_dir, "u1")
         return agent, llm
 
-    def test_setup_extracts_profile(self):
+    def tool_results(self, llm, index=-1):
+        return next(m for m in reversed(llm.calls[index][1]) if m["role"] == "tool_results")["results"]
+
+    def test_setup_saves_profile_through_a_tool(self):
         self.start()
         self.assertEqual(self.store.profile()["name"], "Ana")
         self.assertEqual(self.store.profile()["handles"], "@ana on X")
 
-    def test_tags_are_stored_and_stripped(self):
-        agent, _ = self.start(
-            "Got it [LEARN: no emojis] [PUBLISHED: linkedin | Shipped v2 today] "
-            "[VOICE: my old post] here you go"
-        )
-        reply = agent.handle("u1", "posted it on linkedin, and never use emojis").text
-        self.assertEqual(reply, "Got it here you go")
+    def test_memory_tools_in_one_turn(self):
+        agent, llm = self.start(Turn("", [
+            ToolCall("a", "remember_preference", {"preference": "no emojis"}),
+            ToolCall("b", "log_published", {"network": "linkedin", "text": "Shipped v2 today"}),
+            ToolCall("c", "save_voice_sample", {"text": "my old post"}),
+        ]), "Got it")
+        self.assertEqual(agent.handle("u1", "posted it on linkedin, and never use emojis").text, "Got it")
         self.assertEqual(self.store.preferences(), ["no emojis"])
         self.assertEqual(self.store.published_today()[0]["network"], "linkedin")
         self.assertIn("my old post", self.store.voice_pack())
+        self.assertEqual([r["is_error"] for r in self.tool_results(llm)], [False, False, False])
 
-    def test_skill_is_loaded_then_answered(self):
-        agent, llm = self.start("[SKILL: li-post]", "Here are your hooks")
-        reply = agent.handle("u1", "LinkedIn post about our launch").text
-        self.assertEqual(reply, "Here are your hooks")
+    def test_skill_is_loaded_and_stays(self):
+        agent, llm = self.start(call("load_skill", name="li-post"), "Here are your hooks", "More")
+        self.assertEqual(agent.handle("u1", "LinkedIn post about our launch").text, "Here are your hooks")
         self.assertEqual(self.store.active_skills(), ["li-post"])
-        system_after = "\n".join(llm.calls[-1][0])
-        self.assertIn('<skill name="li-post"', system_after)
-        # The skill request itself never reaches the history.
-        self.assertNotIn("[SKILL", str(self.store.history()))
+        self.assertIn("hooks.json", self.tool_results(llm)[0]["content"])
+        agent.handle("u1", "another one")
+        self.assertIn('<skill name="li-post"', "\n".join(llm.calls[-1][0]))
 
-    def test_already_loaded_skill_does_not_loop(self):
-        agent, llm = self.start("[SKILL: x-post]", "[SKILL: x-post]", "Drafts!")
-        self.assertEqual(agent.handle("u1", "a tweet please").text, "Drafts!")
-        self.assertIn("already loaded", llm.calls[-1][0][-1])
+    def test_unknown_tool_and_bad_input_go_back_as_errors(self):
+        agent, llm = self.start(Turn("", [ToolCall("a", "fly_to_mars", {}),
+                                          ToolCall("b", "log_published", {"network": "myspace", "text": "x"})]), "Sorry")
+        self.assertEqual(agent.handle("u1", "x").text, "Sorry")
+        results = self.tool_results(llm)
+        self.assertTrue(all(r["is_error"] for r in results))
+        self.assertIn("must be one of", results[1]["content"])
 
-    def test_unknown_skill_is_ignored(self):
-        agent, _ = self.start("Sure [SKILL: does-not-exist]")
-        self.assertEqual(agent.handle("u1", "x").text, "Sure")
+    def test_tool_loop_is_capped(self):
+        agent, llm = self.start(*[call("capabilities")] * 20)
+        agent.handle("u1", "loop forever")
+        self.assertEqual(len(llm.calls), 2 + 8)  # setup turns + the cap
+
+    def test_create_file(self):
+        agent, _ = self.start(call("create_file", filename="plan.md", content="# Plan"), "Done.")
+        reply = agent.handle("u1", "plan please")
+        self.assertEqual(reply.text, "Done.")
+        self.assertEqual([f.name for f in reply.files], ["plan.md"])
+        self.assertIn("[sent file: plan.md]", self.store.history()[-1]["content"])
+
+    def test_capabilities_are_honest_without_connections(self):
+        agent, llm = self.start(call("capabilities"), "I can't publish yet.")
+        agent.handle("u1", "publish this on linkedin")
+        text = self.tool_results(llm)[0]["content"]
+        self.assertIn("No accounts are connected", text)
+        self.assertIn("cannot publish", text)
 
     def test_commands_do_not_call_the_model(self):
         agent, llm = self.start()
@@ -72,22 +96,22 @@ class AgentTest(unittest.TestCase):
 
     def test_drafts_are_humanized(self):
         agent, _ = self.start("Option:\n```\nIt was seamless — truly.\n```", humanize=True)
-        reply = agent.handle("u1", "tweet").text
-        self.assertNotIn("—", reply)
+        self.assertNotIn("—", agent.handle("u1", "tweet").text)
 
-    def test_files_in_and_out(self):
-        from agent.files import ingest
-        agent, llm = self.start(*["[FILE: plan.md]\n# Plan\n[/FILE]Done."] + ["ok"] * 4)
-        user_dir = self.store.dir
-        png = ingest(b"\x89PNG fake", "image/png", "shot.png", user_dir, None, ffmpeg="")
-        reply = agent.handle("u1", "plan from this", attachments=[png])
-        self.assertEqual(reply.text, "Done.")
-        self.assertEqual([f.name for f in reply.files], ["plan.md"])
-        self.assertEqual(reply.files[0].read_text(), "# Plan\n")
-        self.assertIn("[sent file: plan.md]", self.store.history()[-1]["content"])
-        # After three newer messages with files, the first image is sent as a note, not as bytes.
+    def test_usage_limit_is_relayed(self):
+        agent, llm = self.start()
+
+        def limited(*_):
+            raise UsageLimitError("You've hit your limit · resets 6pm")
+        llm.respond = limited
+        self.assertIn("resets 6pm", agent.handle("u1", "hello").text)
+
+    def test_attachments_inline_only_for_recent_messages(self):
+        agent, llm = self.start(*["ok"] * 5)
+        png = ingest(b"\x89PNG fake", "image/png", "shot.png", self.store.dir, None, ffmpeg="")
+        agent.handle("u1", "look", attachments=[png])
         for _ in range(3):
-            agent.handle("u1", "again", attachments=[ingest(b"\x89PNG", "image/png", "s.png", user_dir, None, ffmpeg="")])
+            agent.handle("u1", "again", attachments=[ingest(b"\x89PNG", "image/png", "s.png", self.store.dir, None, ffmpeg="")])
         first = next(m for m in llm.calls[-1][1] if m.get("attachments") and m["attachments"][0]["name"] == "shot.png")
         self.assertNotIn("data", first["attachments"][0])
         self.assertIn("data", llm.calls[-1][1][-1]["attachments"][0])
@@ -95,6 +119,7 @@ class AgentTest(unittest.TestCase):
     def test_spanish_texts(self):
         agent, _, tmp = make_agent(language="es")
         self.addCleanup(tmp.cleanup)
+        self.addCleanup(agent.db.close)
         self.assertIn("Hola", agent.handle("u2", "hola").text)
 
 

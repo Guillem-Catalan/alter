@@ -47,6 +47,9 @@ def doctor(config) -> int:
          f"Personal data: {config.data_dir}" + (" is inside a git repository: move it (DATA_DIR)" if inside_git_repo(config.data_dir) else ""))
     library = SkillLibrary(config.skills_dirs)
     line(bool(library.skills), f"Skills: {len(library.skills)} found in {', '.join(str(d) for d in config.skills_dirs)}")
+    from agent import secrets
+    keychain = secrets.available()
+    line(not keychain, "Keychain for connection secrets: " + (keychain or "available"))
     issues = Transcriber(config).problems()
     line(not issues, "Voice notes: " + ("; ".join(issues) if issues else "whisper.cpp and model ready"))
     missing = WhatsAppChannel(config, agent=None, transcriber=None).missing_settings()  # type: ignore[arg-type]

@@ -29,6 +29,8 @@ def run(config: Config, agent: Agent) -> None:
             say(reply.text)
         for path in reply.files:
             app.client.files_upload_v2(channel=event["channel"], file=str(path), filename=path.name)
+        for card in reply.cards:
+            say(f"*{card.summary}*\n{card.content}\n_Reply *yes* to confirm or *cancel*._".strip())
 
     app.event("message")(answer)
     app.event("app_mention")(answer)

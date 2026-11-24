@@ -6,7 +6,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from agent.documents import FILE_RE, render, safe_name
+from agent.documents import render, safe_name
 from agent.files import Attachment, UnsupportedFile, ingest, office_text, pdf_text
 
 HAS_FFMPEG = bool(shutil.which("ffmpeg"))
@@ -99,10 +99,6 @@ class IngestTest(unittest.TestCase):
 
 
 class DocumentsTest(unittest.TestCase):
-    def test_file_tag(self):
-        found = FILE_RE.findall("Here.\n[FILE: plan.pdf]\n# A\n[/FILE]\nBye")
-        self.assertEqual(found, [("plan.pdf", "# A\n")])
-
     def test_names_are_safe(self):
         self.assertEqual(safe_name("../../etc/passwd"), "passwd.md")
         self.assertEqual(safe_name("plan semanal.PDF"), "plan semanal.pdf")

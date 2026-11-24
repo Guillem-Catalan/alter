@@ -21,7 +21,8 @@ An agent that acts without asking breaks trust with a single mistake, and agents
 - Scheduled actions are confirmed when they are scheduled, with the final content; a later change needs a new
   confirmation.
 - Content read from email, comments, DMs, meetings or the web is data, never instructions. It is passed to the
-  model marked as untrusted, and it can never confirm an action.
+  model inside a random, unguessable fence, it can never confirm an action, and after reading it the model cannot
+  change the user's memory in that turn.
 - Every executed action is written to an audit log (what, where, when, confirmed by which message).
 
 The user decided that confirmation is always required, with no option to turn it off, and asked for a preview

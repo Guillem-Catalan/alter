@@ -1,6 +1,7 @@
 """Chat with the agent from the terminal: the quickest way to try it without any chat app.
 
 Attach files with `-f` (one-shot) or by starting a line with `/file <path>` (interactive).
+Cards are confirmed with `/confirm <id>` or `/cancel <id>` (or typing yes when only one is waiting).
 """
 import shlex
 from pathlib import Path
@@ -13,9 +14,17 @@ UID = "terminal"
 
 
 def _show(reply: Reply) -> None:
-    print(reply.text)
+    if reply.text:
+        print(reply.text)
     for path in reply.files:
         print(f"[file] {path}")
+    for card in reply.cards:
+        print(f"\n[card {card.id}] {card.summary}")
+        if card.content:
+            print(card.content)
+        if card.image:
+            print(f"[preview] {card.image}")
+        print(f"/confirm {card.id}  ·  /cancel {card.id}")
 
 
 def _ingest(agent: Agent, transcriber, ffmpeg: str, paths: list[Path]):
@@ -35,6 +44,11 @@ def run(agent: Agent, transcriber, ffmpeg: str, message: str | None = None, file
             print()
             return
         attachments = []
+        if line.startswith(("/confirm ", "/cancel ")):
+            verb, _, card_id = line[1:].partition(" ")
+            _show(agent.handle(UID, "", "terminal", button=f"{verb}:{card_id.strip()}"))
+            print()
+            continue
         if line.startswith("/file "):
             parts = shlex.split(line[len("/file "):])
             if not parts:

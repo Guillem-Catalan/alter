@@ -36,11 +36,17 @@ OUTGOING_MIME = {
 
 TEXTS = {
     "en": {
+        "confirm": "Confirm",
+        "cancel": "Cancel",
+        "ttl": "Confirm or cancel within 24 h",
         "unsupported": "I can't read that kind of message. Send me text, voice notes, photos, documents or videos.",
         "file_failed": "I couldn't read that file: {error}.",
         "audio_empty": "I couldn't hear anything in that voice note. Could you try again?",
     },
     "es": {
+        "confirm": "Confirmar",
+        "cancel": "Cancelar",
+        "ttl": "Confirma o cancela en 24 h",
         "unsupported": "Ese tipo de mensaje no lo puedo leer. Mándame texto, audios, fotos, documentos o vídeos.",
         "file_failed": "No he podido leer ese archivo: {error}.",
         "audio_empty": "No he oído nada en ese audio. ¿Lo intentas otra vez?",
@@ -104,8 +110,7 @@ class WhatsAppClient:
             raise UnsupportedFile(f"too big ({int(meta['file_size']) // 1_000_000} MB, limit {MAX_FILE_BYTES // 1_000_000} MB)")
         return self._request(meta["url"]), meta.get("mime_type", "")
 
-    def send_document(self, to: str, path: Path) -> None:
-        mime = OUTGOING_MIME.get(path.suffix.lower(), "text/plain")
+    def upload_media(self, path: Path, mime: str) -> str:
         boundary = uuid.uuid4().hex
         fields = [("messaging_product", "whatsapp"), ("type", mime)]
         body = b"".join(
@@ -121,10 +126,33 @@ class WhatsAppClient:
         if urllib.parse.urlparse(req.full_url).scheme not in ("https", "http"):
             raise ValueError("Refusing a non-HTTP URL")
         with urllib.request.urlopen(req, timeout=120) as resp:  # nosemgrep: dynamic-urllib-use-detected (scheme checked above)
-            media_id = json.loads(resp.read())["id"]
+            return json.loads(resp.read())["id"]
+
+    def send_document(self, to: str, path: Path) -> None:
+        media_id = self.upload_media(path, OUTGOING_MIME.get(path.suffix.lower(), "text/plain"))
         self._request(f"{self.base}/{self.phone_number_id}/messages", {
             "messaging_product": "whatsapp", "recipient_type": "individual", "to": to,
             "type": "document", "document": {"id": media_id, "filename": path.name},
+        })
+
+    def send_card(self, to: str, card_id: str, summary: str, content: str, image: str, texts: dict) -> None:
+        """The exact content first (so it can be read and copied in full), then the card with its buttons."""
+        if content:
+            self.send_text(to, content)
+        interactive: dict = {
+            "type": "button",
+            "body": {"text": summary[:1024]},
+            "footer": {"text": texts["ttl"][:60]},
+            "action": {"buttons": [
+                {"type": "reply", "reply": {"id": f"confirm:{card_id}", "title": texts["confirm"][:20]}},
+                {"type": "reply", "reply": {"id": f"cancel:{card_id}", "title": texts["cancel"][:20]}},
+            ]},
+        }
+        if image and Path(image).exists():
+            interactive["header"] = {"type": "image", "image": {"id": self.upload_media(Path(image), "image/png")}}
+        self._request(f"{self.base}/{self.phone_number_id}/messages", {
+            "messaging_product": "whatsapp", "recipient_type": "individual", "to": to,
+            "type": "interactive", "interactive": interactive,
         })
 
 
@@ -199,21 +227,28 @@ class WhatsAppChannel:
             content = self._content_of(uid, message)
             if content is None:
                 return
-            text, attachments = content
-            reply = self.agent.handle(uid, text, channel="whatsapp", attachments=attachments)
+            text, attachments, button = content
+            reply = self.agent.handle(uid, text, channel="whatsapp", attachments=attachments, button=button)
             for part in split_drafts(reply.text):
                 self.client.send_text(sender, part)
             for path in reply.files:
                 self.client.send_document(sender, path)
+            for card in reply.cards:
+                self.client.send_card(sender, card.id, card.summary, card.content, card.image, self.texts)
         except Exception:
             log.exception("Failed to answer a WhatsApp message")
 
     def _content_of(self, uid: str, message: dict):
-        """(text, attachments) for a message, or None when it was answered here (unsupported, failed)."""
+        """(text, attachments, button) for a message, or None when it was answered here (unsupported, failed)."""
         kind = message.get("type")
         sender = digits(message.get("from", ""))
         if kind == "text":
-            return message.get("text", {}).get("body", ""), []
+            return message.get("text", {}).get("body", ""), [], ""
+        if kind == "interactive":
+            reply = message.get("interactive", {}).get("button_reply") or {}
+            return "", [], str(reply.get("id", ""))
+        if kind == "button":  # quick-reply buttons of template messages
+            return "", [], str(message.get("button", {}).get("payload", ""))
         if kind in IGNORED_TYPES:
             return None
         if kind not in MEDIA_TYPES:
@@ -235,7 +270,7 @@ class WhatsAppChannel:
         if kind == "audio" and not attachment.text.strip():
             self.client.send_text(sender, self.texts["audio_empty"])
             return None
-        return media.get("caption", ""), [attachment]
+        return media.get("caption", ""), [attachment], ""
 
     def make_server(self, host: str = "127.0.0.1", port: int | None = None) -> ThreadingHTTPServer:
         channel = self
