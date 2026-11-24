@@ -2,7 +2,8 @@
 
 **Your alter ego for social media.** A self-hosted assistant that lives in your WhatsApp and helps you publish on **X, LinkedIn, Instagram and YouTube**.
 Send it an idea by text or **voice note**, and it turns it into posts in *your* voice. It learns from every
-correction and never posts anything for you: you get clean drafts, one per message, ready to copy.
+correction, and it never does anything on your behalf without your confirmation: drafts arrive one per
+message, ready to copy, and every action comes as a card you confirm or cancel.
 
 - **Runs on your machine.** Your chats, style and voice notes stay in a private folder on your computer, outside
   the repo. Voice notes are transcribed locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp).
@@ -37,8 +38,12 @@ WhatsApp ──> Meta ──> tunnel (ngrok) ──> main.py whatsapp ──> ag
 ```
 
 The agent keeps, per person: a profile, learned style preferences, voice samples, the last 30 messages and the
-posts they published. It talks to the model with a few tags that are stripped before you see the answer:
-`[LEARN:]`, `[PUBLISHED:]`, `[VOICE:]`, `[SETUP:]` and `[SKILL:]`.
+posts they published. The model works through tools (load a skill, create a file, remember a preference, check
+what it can do...). Tools that would act on your accounts never run directly: they send you a **confirmation
+card** with the exact content and two buttons, **Confirm** and **Cancel**. Asking for a change replaces the card;
+cancelling asks what to change. Everything confirmed is written to an audit log. Facts and numbers must come from
+you, your files or your connected accounts, never from the model. Design: [`docs/specs/agent-platform.md`](docs/specs/agent-platform.md)
+and [`docs/adr/`](docs/adr/).
 
 ## Install
 

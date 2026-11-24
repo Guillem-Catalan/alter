@@ -1,6 +1,6 @@
 # Spec: the agent platform (actions, confirmations, connections, web, schedules)
 
-Date: 2026-11-24 · Status: approved design, not built yet · Decisions: ADR 0001-0006
+Date: 2026-11-24 · Status: build order step 1 (tools, agent loop, cards, SQLite, keychain, connector interface) built; the rest pending · Decisions: ADR 0001-0006
 
 ## Goal
 Turn Alter from a writing assistant into a personal social media agent you talk to on WhatsApp: it reads from
@@ -44,7 +44,7 @@ Scheduler ┘        │          │     └─ pending actions ─> confirmati
 ```python
 @dataclass
 class Tool:
-    name: str             # "linkedin.publish_post"
+    name: str             # "linkedin_publish_post"
     description: str      # what it does, for the model
     input_schema: dict    # JSON schema, strict
     kind: Literal["read", "act"]
@@ -129,7 +129,7 @@ conversation outside WhatsApp's 24-hour window need an approved template: the fi
 the window and shows the rest in the web's Activity page; templates are a later decision.
 
 ### Performance, comments and reach (ADR 0005)
-- Read tools per connector: `<network>.post_metrics`, `<network>.post_comments`, `<network>.recent_posts`.
+- Read tools per connector: `<network>_post_metrics`, `<network>_post_comments`, `<network>_recent_posts`.
   Each result carries its source and timestamp.
 - A report message is built by code: figures, deltas since the last report, and new comments with author and text
   (comment text is untrusted data). The model may add a short comment below, without numbers of its own.
