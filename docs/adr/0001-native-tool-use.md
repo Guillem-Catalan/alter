@@ -1,4 +1,4 @@
-# 0001. Actions are native tool calls, bridged through MCP for the Claude Code provider
+# 0001. Actions are native tool calls; Claude Code requests them through structured output
 
 Date: 2026-11-24 · Status: accepted
 
@@ -20,8 +20,11 @@ Provider adapters expose the same registry:
 
 - Anthropic and Azure: native `tool_use`.
 - OpenAI-compatible: function calling.
-- Claude Code: Alter starts a small local MCP server (stdio) with the same tools and passes it to `claude -p`
-  with `--mcp-config` and `--strict-mcp-config`; Claude Code's built-in tools stay disabled (`--tools ""`).
+- Claude Code: the tools are described in the system prompt and the model answers through structured output
+  (`--json-schema`) with its text and the tool calls it wants. Alter runs them and continues the loop, exactly
+  as with the other providers. Claude Code's built-in tools, settings and MCP servers stay disabled.
+  (This replaced a first plan to bridge the tools over MCP: with MCP, Claude Code would execute the tools
+  itself, outside Alter's confirmation cards and the user's context.)
 
 The existing tags become tools (`load_skill`, `create_file`, `remember_preference`, `log_published`,
 `save_voice_sample`, `set_profile`).
@@ -32,6 +35,6 @@ The user chose this option for reliability.
 - Arguments are validated in code against the tool's schema before anything runs, the same way for every
   provider; invalid calls go back to the model as errors so it can retry.
 - One tool definition serves every provider; adding a connector means adding tools, not prompt syntax.
-- More code than tags: an adapter per provider and an MCP server for Claude Code (adds the `mcp` package).
+- More code than tags: an adapter per provider. Claude Code needs no extra package.
 - Tool results go back to the model in the same turn, so reading (a meeting, an inbox) works in one exchange.
 - Tools that act outside Alter never execute from the model's call directly: see ADR 0002.

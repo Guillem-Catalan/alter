@@ -14,11 +14,17 @@ so a turn with tool calls is sent back exactly as the model produced it.
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+import uuid
+from dataclasses import dataclass, field, replace
 
-from .config import Config
+from .config import DEFAULT_MODELS, Config
 from .tools import Tool, ToolCall
 
 # Models that accept the server-side refusal fallback on the first-party Claude API.
@@ -209,9 +215,158 @@ class OpenAICompatibleLLM:
         return Turn(message.get("content") or "", calls)
 
 
-def make_llm(config: Config):
+LIMIT_RE = re.compile(r"usage limit|limit reached|hit your limit|rate limit|resets? (at|in)", re.IGNORECASE)
+
+TURN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "text": {"type": "string", "description": "Your message to the user. Empty only while you call tools."},
+        "tool_calls": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "input": {"type": "object"}},
+            "required": ["name", "input"],
+        }},
+    },
+    "required": ["text", "tool_calls"],
+}
+
+TOOLS_PROTOCOL = """TOOLS
+You reply with JSON: `text` (your message to the user) and `tool_calls` (tools to use now, each with `name` and
+`input` matching its schema). When you call tools, their results come back in the next message and you continue;
+when you are done, reply with `text` and an empty `tool_calls`. Available tools:
+"""
+
+
+class ClaudeCodeLLM:
+    """Claude through the user's own installed and signed-in Claude Code (`claude -p`), on their plan.
+
+    Alter never reads or stores Claude credentials: it runs the unmodified CLI with no built-in tools, no user
+    settings and no MCP servers. Tools are described in the prompt and requested through structured output, so
+    they still run inside Alter, behind the same confirmation cards as every other provider.
+    """
+
+    def __init__(self, config: Config):
+        self.bin = shutil.which(config.claude_bin) or ""
+        if not self.bin:
+            raise LLMError(f"Claude Code not found ({config.claude_bin}). Install it from https://claude.com/claude-code")
+        self.model = config.llm_model
+        self.effort = config.llm_effort
+        self.workdir = tempfile.mkdtemp(prefix="alter-claude-")  # empty folder: no project instructions are loaded
+
+    def _command(self, system: str) -> list[str]:
+        cmd = [self.bin, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+               "--json-schema", json.dumps(TURN_SCHEMA), "--tools", "", "--setting-sources", "",
+               "--strict-mcp-config", "--no-session-persistence", "--system-prompt", system]
+        if self.model:
+            cmd += ["--model", self.model]
+        if self.effort:
+            cmd += ["--effort", self.effort]
+        return cmd
+
+    @staticmethod
+    def _content(messages: list[dict]) -> list[dict]:
+        """The whole conversation as one user message: a transcript, with images and PDFs where they belong."""
+        blocks: list[dict] = []
+
+        def text(value: str) -> None:
+            if blocks and blocks[-1]["type"] == "text":
+                blocks[-1]["text"] += value
+            else:
+                blocks.append({"type": "text", "text": value})
+
+        text("Conversation so far (the last USER message is the one to answer):\n")
+        for m in messages:
+            role = m["role"]
+            if role == "user":
+                for a in m.get("attachments", []):
+                    if a.get("data") and a["kind"] == "image":
+                        blocks.append({"type": "image", "source": {"type": "base64", "media_type": a["mime"], "data": a["data"]}})
+                    elif a.get("data") and a["kind"] == "pdf":
+                        blocks.append({"type": "document", "title": a["name"],
+                                       "source": {"type": "base64", "media_type": "application/pdf", "data": a["data"]}})
+                    else:
+                        text("\n" + _attachment_note(a))
+                text(f"\n\nUSER: {_text_of(m) if m.get('attachments') else m['content']}")
+            elif role == "assistant":
+                if m["content"]:
+                    text(f"\n\nASSISTANT: {m['content']}")
+                for c in m.get("tool_calls") or []:
+                    text(f"\n\nASSISTANT called {c['name']} with {json.dumps(c['input'], ensure_ascii=False)}")
+            elif role == "tool_results":
+                for r in m["results"]:
+                    status = "ERROR" if r.get("is_error") else "RESULT"
+                    text(f"\n\nTOOL {status} ({r['name']}): {r['content']}")
+        return blocks
+
+    def respond(self, system_blocks: list[str], messages: list[dict], tools: list[Tool]) -> Turn:
+        catalog = "\n".join(
+            f"- {t.name}: {t.description}\n  input schema: {json.dumps(t.schema_for_model(), ensure_ascii=False)}"
+            for t in tools)
+        system = "\n\n".join([b for b in system_blocks if b] + ([TOOLS_PROTOCOL + catalog] if tools else []))
+        request = {"type": "user", "message": {"role": "user", "content": self._content(messages)}}
+        # Without these, Claude Code would bill an API key instead of the user's plan.
+        env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+        try:
+            proc = subprocess.run(self._command(system), input=json.dumps(request) + "\n", capture_output=True,
+                                  text=True, timeout=600, cwd=self.workdir, env=env, check=False)
+        except subprocess.TimeoutExpired as e:
+            raise LLMError("Claude Code took too long to answer") from e
+        result = None
+        for line in proc.stdout.splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "result":
+                result = event
+        if result is None:
+            detail = (proc.stderr or proc.stdout).strip()[-300:]
+            if "login" in detail.lower() or "logged in" in detail.lower():
+                raise LLMError("Claude Code is not signed in. Run `claude` once and log in with your plan.")
+            raise LLMError(f"Claude Code failed: {detail or f'exit code {proc.returncode}'}")
+        if result.get("is_error"):
+            message = str(result.get("result") or result.get("subtype") or "unknown error")
+            if result.get("api_error_status") == 429 or LIMIT_RE.search(message):
+                raise UsageLimitError(message)
+            raise LLMError(f"Claude Code error: {message}")
+        output = result.get("structured_output") or {}
+        calls = [ToolCall(f"cc_{uuid.uuid4().hex[:10]}", str(c.get("name", "")), c.get("input") or {})
+                 for c in output.get("tool_calls") or [] if isinstance(c, dict)]
+        return Turn(str(output.get("text") or result.get("result") or ""), calls)
+
+
+class FallbackLLM:
+    """Uses `primary` and switches to `secondary` for a turn when the primary's plan or quota is used up."""
+
+    def __init__(self, primary, secondary):
+        self.primary, self.secondary = primary, secondary
+        self.model = getattr(primary, "model", "")
+
+    def respond(self, system_blocks: list[str], messages: list[dict], tools: list[Tool]) -> Turn:
+        try:
+            return self.primary.respond(system_blocks, messages, tools)
+        except UsageLimitError:
+            return self.secondary.respond(system_blocks, messages, tools)
+
+
+PROVIDERS = ("anthropic", "azure", "openai", "claude-code")
+
+
+def _single(config: Config):
     if config.llm_provider in ("anthropic", "azure"):
         return ClaudeLLM(config)
     if config.llm_provider == "openai":
         return OpenAICompatibleLLM(config)
-    raise LLMError(f"Unknown LLM_PROVIDER {config.llm_provider!r} (use anthropic, azure or openai)")
+    if config.llm_provider == "claude-code":
+        return ClaudeCodeLLM(config)
+    raise LLMError(f"Unknown LLM_PROVIDER {config.llm_provider!r} (use {', '.join(PROVIDERS)})")
+
+
+def make_llm(config: Config):
+    primary = _single(config)
+    fallback = config.llm_fallback_provider
+    if not fallback or fallback == config.llm_provider:
+        return primary
+    model = config.azure_deployment if fallback == "azure" else ""
+    secondary = _single(replace(config, llm_provider=fallback, llm_model=model or DEFAULT_MODELS.get(fallback, "")))
+    return FallbackLLM(primary, secondary)

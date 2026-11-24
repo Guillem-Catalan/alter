@@ -26,6 +26,24 @@ def build_agent(config):
     return Agent(make_llm(config), library, config.data_dir, config.bot_name, config.language, humanizer)
 
 
+def claude_code_status(config) -> tuple[bool, str]:
+    """Whether the installed Claude Code is signed in. Alter only asks the CLI; it never reads credentials."""
+    import json
+    import subprocess
+
+    binary = shutil.which(config.claude_bin)
+    if not binary:
+        return False, "Claude Code: not installed (https://claude.com/claude-code)"
+    try:
+        out = subprocess.run([binary, "auth", "status"], capture_output=True, text=True, timeout=30, check=False).stdout
+        status = json.loads(out)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return False, "Claude Code: could not read its sign-in status (run `claude auth status`)"
+    if not status.get("loggedIn"):
+        return False, "Claude Code: not signed in. Run `claude` and log in with your Claude plan"
+    return True, f"Claude Code: signed in ({status.get('authMethod', 'unknown')})"
+
+
 def doctor(config) -> int:
     from agent.channels.whatsapp import WhatsAppChannel
 
@@ -40,9 +58,12 @@ def doctor(config) -> int:
     line(sys.version_info >= (3, 10), f"Python {sys.version.split()[0]} (3.10+ needed)")
     try:
         llm = make_llm(config)
-        line(True, f"Model: {config.llm_provider} / {getattr(llm, 'model', '')}")
+        line(True, f"Model: {config.llm_provider} / {getattr(llm, 'model', '') or 'default'}"
+             + (f", falls back to {config.llm_fallback_provider}" if config.llm_fallback_provider else ""))
     except (LLMError, ImportError) as e:
         line(False, f"Model: {e}")
+    if config.llm_provider == "claude-code":
+        line(*claude_code_status(config))
     line(not inside_git_repo(config.data_dir),
          f"Personal data: {config.data_dir}" + (" is inside a git repository: move it (DATA_DIR)" if inside_git_repo(config.data_dir) else ""))
     library = SkillLibrary(config.skills_dirs)

@@ -75,8 +75,11 @@ class Config:
     llm_model: str
     llm_effort: str
     llm_fallbacks: bool
+    llm_fallback_provider: str
+    claude_bin: str
     azure_endpoint: str
     azure_api_key: str
+    azure_deployment: str
     openai_base_url: str
     openai_api_key: str
 
@@ -129,8 +132,11 @@ def load_config(env_file: Path | None = None) -> Config:
         llm_model=model,
         llm_effort=_env("LLM_EFFORT"),
         llm_fallbacks=_flag("LLM_FALLBACKS", True),
+        llm_fallback_provider=_env("LLM_FALLBACK_PROVIDER").lower(),
+        claude_bin=_env("CLAUDE_BIN", "claude"),
         azure_endpoint=_env("AZURE_CLAUDE_ENDPOINT").rstrip("/"),
         azure_api_key=_env("AZURE_CLAUDE_API_KEY"),
+        azure_deployment=_env("AZURE_CLAUDE_DEPLOYMENT") or DEFAULT_MODELS["azure"],
         openai_base_url=_env("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
         openai_api_key=_env("OPENAI_API_KEY"),
         whisper_bin=_env("WHISPER_BIN", "whisper-cli"),
