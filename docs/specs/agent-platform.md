@@ -55,8 +55,11 @@ class Tool:
   `save_voice_sample`, `set_profile`, `send_web_link`.
 - The agent loop sends the conversation and the tools, runs read tools and feeds results back, and stops when the
   model answers. A cap on tool calls per turn prevents loops.
-- Content returned by read tools that comes from other people (emails, comments, DMs, transcripts) is wrapped as
-  untrusted data, and the system prompt says it is never instructions.
+- Content returned by read tools that comes from other people (emails, comments, DMs, transcripts) is fenced
+  with a random per-call boundary (any boundary-like text inside is neutralised), and the system prompt says it
+  is never instructions.
+- Once a turn has read untrusted content, tools that change the user's memory (profile, preferences, voice
+  samples, published log) are refused for the rest of that turn; the model must ask the user.
 
 ### Pending actions and confirmation
 - Calling an act tool validates the input, stores a pending action `{id, user, tool, input, preview, status,

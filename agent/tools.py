@@ -48,6 +48,7 @@ class Tool:
     run: Callable[[Any, dict], ToolResult | str]
     card: Callable[[Any, dict], Card] | None = None
     capability: str = ""      # short line for the capabilities list ("Publish a post on LinkedIn")
+    remembers: bool = False   # changes the user's memory (profile, preferences, voice): blocked after untrusted data
 
     def __post_init__(self):
         if not NAME_RE.match(self.name):

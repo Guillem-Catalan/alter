@@ -29,6 +29,7 @@ class Context:
     channel: str
     connections: list[Connection] = field(default_factory=list)
     files: list[Path] = field(default_factory=list)
+    read_untrusted: bool = False  # set once this turn has read text written by other people
 
 
 def _load_skill(ctx: Context, args: dict) -> ToolResult:
@@ -90,14 +91,15 @@ def core_tools(library: SkillLibrary) -> list[Tool]:
              obj({"filename": {"type": "string", "description": f"Name with one of: {' '.join(SUPPORTED)}"},
                   "content": {"type": "string"}}), "internal", _create_file),
         Tool("remember_preference", "Store a style preference the user expressed (\"too formal\", \"never use emojis\").",
-             obj({"preference": {"type": "string", "maxLength": 300}}), "internal", _remember),
+             obj({"preference": {"type": "string", "maxLength": 300}}), "internal", _remember, remembers=True),
         Tool("log_published", "Record a post the user says they published themselves, with its exact text.",
-             obj({"network": {"type": "string", "enum": NETWORKS}, "text": {"type": "string"}}), "internal", _log_published),
+             obj({"network": {"type": "string", "enum": NETWORKS}, "text": {"type": "string"}}), "internal", _log_published,
+             remembers=True),
         Tool("save_voice_sample", "Save one of the user's own past posts as an example of their voice.",
-             obj({"text": {"type": "string"}}), "internal", _voice),
+             obj({"text": {"type": "string"}}), "internal", _voice, remembers=True),
         Tool("set_profile", "Save the user's profile when they introduce themselves.",
              obj({"name": {"type": "string"}, "handles": {"type": "string"}, "context": {"type": "string"}}),
-             "internal", _profile),
+             "internal", _profile, remembers=True),
         Tool("capabilities", "List what you can and cannot do right now, given the user's connected accounts. "
              "Check it before promising anything that needs an account.", obj({}), "read", _capabilities),
     ]
