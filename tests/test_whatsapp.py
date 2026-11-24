@@ -13,7 +13,8 @@ from pathlib import Path
 from agent.channels.whatsapp import WhatsAppChannel, chunk, valid_signature
 from agent.config import load_config
 
-from tests.helpers import make_agent
+from tests.helpers import call, make_agent
+from tests.test_actions import PUBLISHED
 
 SECRET = "app-secret"
 # 1x1 transparent PNG
@@ -88,9 +89,11 @@ class WhatsAppBase(unittest.TestCase):
         self.addCleanup(self.graph.server.server_close)
         self.addCleanup(self.graph.server.shutdown)
         self.agent, self.llm, tmp = make_agent(
-            "[SETUP: Ana | @ana | CRM]Hi Ana", "Two drafts:\n```\nPost one\n```\n```\nPost two\n```\nGo with one."
+            call("set_profile", name="Ana", handles="@ana", context="CRM"), "Hi Ana",
+            "Two drafts:\n```\nPost one\n```\n```\nPost two\n```\nGo with one.",
         )
         self.addCleanup(tmp.cleanup)
+        self.addCleanup(self.agent.db.close)
         config = replace(
             load_config(env_file=Path(tmp.name) / "no.env"),
             whatsapp_token="token", whatsapp_phone_number_id="999", whatsapp_app_secret=SECRET,
@@ -128,6 +131,9 @@ class WhatsAppBase(unittest.TestCase):
     def bodies(self):
         return [m["text"]["body"] for m in self.graph.sent if m["type"] == "text"]
 
+    def last_user_message(self):
+        return next(m for m in reversed(self.llm.calls[-1][1]) if m["role"] == "user")
+
 
 class WhatsAppTest(WhatsAppBase):
     def test_verification_handshake(self):
@@ -149,7 +155,7 @@ class WhatsAppTest(WhatsAppBase):
         # Each draft arrives as its own message, without backticks.
         self.assertEqual(bodies[2:], ["Two drafts:", "Post one", "Post two", "Go with one."])
         self.assertEqual(self.heard, [(b"OGGDATA", ".ogg")])
-        voice = self.llm.calls[-1][1][-1]["attachments"][0]
+        voice = self.last_user_message()["attachments"][0]
         self.assertEqual((voice["kind"], voice["text"]), ("audio", "make a tweet about shipping"))
         self.assertTrue(all(m["to"] == OWNER for m in self.graph.sent))
         self.assertEqual({s["message_id"] for s in self.graph.statuses}, {"m1", "m2", "m3"})
@@ -179,7 +185,8 @@ class WhatsAppFilesTest(WhatsAppBase):
 
     def setUp(self):
         super().setUp()
-        self.llm.replies = ["[SETUP: Ana | @ana | CRM]Hi", "Here is your plan.\n[FILE: plan.pdf]\n# Plan\n- Monday: post\n[/FILE]"]
+        self.llm.turns = [call("set_profile", name="Ana", handles="@ana", context="CRM"), "Hi",
+                          call("create_file", filename="plan.pdf", content="# Plan\n- Monday: post"), "Here is your plan."]
         self.post(payload({"from": OWNER, "id": "a1", "type": "text", "text": {"body": "hola"}}))
         self.post(payload({"from": OWNER, "id": "a2", "type": "text", "text": {"body": "I'm Ana"}}))
         self.wait()
@@ -188,7 +195,7 @@ class WhatsAppFilesTest(WhatsAppBase):
         self.post(payload({"from": OWNER, "id": "p1", "type": "image",
                            "image": {"id": "img-1", "mime_type": "image/png", "caption": "make a plan from this"}}))
         self.wait()
-        sent = self.llm.calls[-1][1][-1]
+        sent = self.last_user_message()
         self.assertEqual(sent["content"], "make a plan from this")
         self.assertEqual(sent["attachments"][0]["kind"], "image")
         self.assertTrue(sent["attachments"][0]["data"])  # the image itself reaches the model
@@ -202,6 +209,46 @@ class WhatsAppFilesTest(WhatsAppBase):
         self.post(payload({"from": OWNER, "id": "v1", "type": "video", "video": {"id": "big-1"}}))
         self.wait()
         self.assertIn("too big", self.bodies()[-1])
+
+
+class WhatsAppCardsTest(WhatsAppBase):
+    """An action becomes a card with buttons; only tapping Confirm runs it."""
+
+    def setUp(self):
+        super().setUp()
+        PUBLISHED.clear()
+        self.llm.turns = [call("set_profile", name="Ana", handles="@ana", context="CRM"), "Hi",
+                          call("testnet_publish", text="Shipped v2"), "A card is waiting."]
+        self.agent.connections.add(f"wa-{OWNER}", "testnet", "@ana")
+        for i, body in enumerate(["hola", "I'm Ana", "publish that we shipped v2"]):
+            self.post(payload({"from": OWNER, "id": f"c{i}", "type": "text", "text": {"body": body}}))
+        self.wait()
+        self.card = next(m for m in self.graph.sent if m["type"] == "interactive")
+
+    def tap(self, button_id: str, message_id: str):
+        self.post(payload({"from": OWNER, "id": message_id, "type": "interactive",
+                           "interactive": {"type": "button_reply", "button_reply": {"id": button_id, "title": "x"}}}))
+        self.wait()
+
+    def test_card_has_the_exact_content_and_two_buttons(self):
+        self.assertEqual(PUBLISHED, [])
+        self.assertIn("Shipped v2", self.bodies())  # exact content sent before the card
+        buttons = self.card["interactive"]["action"]["buttons"]
+        self.assertEqual([b["reply"]["title"] for b in buttons], ["Confirm", "Cancel"])
+        self.assertEqual(self.card["interactive"]["body"]["text"], "Publish on TestNet as @ana")
+
+    def test_confirm_button_publishes(self):
+        confirm = self.card["interactive"]["action"]["buttons"][0]["reply"]["id"]
+        self.tap(confirm, "t1")
+        self.assertEqual(PUBLISHED, [{"text": "Shipped v2"}])
+        self.assertIn("Done", self.bodies()[-1])
+        self.tap(confirm, "t2")  # a second tap does nothing
+        self.assertEqual(len(PUBLISHED), 1)
+
+    def test_cancel_button_asks_what_to_change(self):
+        self.tap(self.card["interactive"]["action"]["buttons"][1]["reply"]["id"], "t1")
+        self.assertEqual(PUBLISHED, [])
+        self.assertEqual(self.bodies()[-1], "Cancelled. What should I change?")
 
 
 class HelpersTest(unittest.TestCase):

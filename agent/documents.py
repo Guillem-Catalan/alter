@@ -1,4 +1,4 @@
-"""Files the assistant creates: the model writes Markdown inside [FILE: name.ext] ... [/FILE] and this turns it into the file.
+"""Files the assistant creates: the model calls the create_file tool with Markdown and this turns it into the file.
 
 Supported: .pdf (fpdf2), .docx (python-docx), .md, .txt, .csv.
 """
@@ -7,7 +7,6 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-FILE_RE = re.compile(r"\[FILE:\s*([^\]\n]+?)\s*\]\n?(.*?)\[/FILE\]", re.DOTALL)
 SUPPORTED = (".pdf", ".docx", ".md", ".txt", ".csv")
 # Font families with real bold/italic files, first one found wins; a wide-coverage font fills missing glyphs.
 FONT_FAMILIES = [

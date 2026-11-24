@@ -3,25 +3,32 @@ from pathlib import Path
 
 from agent.brain import Agent
 from agent.config import ROOT
+from agent.llm import Turn
 from agent.skills import SkillLibrary, load_humanizer
+from agent.tools import ToolCall
+
+
+def call(tool: str, /, **args) -> Turn:
+    """A model turn that calls one tool."""
+    return Turn("", [ToolCall(f"call_{tool}_{len(args)}", tool, args)])
 
 
 class FakeLLM:
-    """Returns scripted replies in order and records what it was sent."""
+    """Returns scripted turns in order (a str is a plain text answer) and records every request."""
 
-    def __init__(self, *replies: str):
-        self.replies = list(replies)
-        self.calls: list[tuple[list[str], list[dict]]] = []
+    def __init__(self, *turns):
+        self.turns = list(turns)
+        self.calls: list[tuple[list[str], list[dict], list]] = []
 
-    def complete(self, system_blocks, messages):
-        self.calls.append((list(system_blocks), [dict(m) for m in messages]))
-        return self.replies.pop(0) if self.replies else "ok"
+    def respond(self, system_blocks, messages, tools):
+        self.calls.append((list(system_blocks), [dict(m) for m in messages], list(tools)))
+        turn = self.turns.pop(0) if self.turns else "ok"
+        return Turn(turn) if isinstance(turn, str) else turn
 
 
-def make_agent(*replies: str, humanize: bool = False, language: str = "en"):
+def make_agent(*turns, humanize: bool = False, language: str = "en"):
     tmp = tempfile.TemporaryDirectory()
     library = SkillLibrary([ROOT / "skills"])
-    llm = FakeLLM(*replies)
-    agent = Agent(llm, library, Path(tmp.name), "TestBot", language,
-                  load_humanizer(library) if humanize else None)
+    llm = FakeLLM(*turns)
+    agent = Agent(llm, library, Path(tmp.name), "TestBot", language, load_humanizer(library) if humanize else None)
     return agent, llm, tmp
