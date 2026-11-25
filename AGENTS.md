@@ -43,8 +43,9 @@ scripts/download-whisper-model.sh
 - Never read, print or commit `.env`. New settings: add the name to `.env.example` and the README.
 - Act tools never run when the model calls them: only `Actions.confirm`, reached from a user's button or typed
   yes. Never add a tool that confirms or cancels cards. Keep `tests/test_actions.py` passing.
-- Untrusted text is fenced by `wrap_untrusted` (random boundary); tools with `remembers=True` are refused after a
-  turn read untrusted text. New memory-changing tools must set `remembers=True`.
+- Untrusted text is fenced by `wrap_untrusted` (random boundary); tools with `remembers=True` are refused while
+  untrusted text is in the history (`untrusted` flag on the reply; `new chat` clears it). New memory-changing tools
+  must set `remembers=True`. Stored text going into the system prompt passes through `neutralise`.
 - New tables go in `agent/db.py` `MIGRATIONS` with a unique name; never edit a migration that has shipped.
 - Connector capabilities must be honest; acting only through official APIs (ADR 0006).
 - Alter never publishes: it returns text and files. No invented metrics.

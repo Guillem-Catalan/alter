@@ -28,6 +28,9 @@ MAX_BODY_BYTES = 1_000_000
 MAX_TEXT_CHARS = 4000  # WhatsApp's limit is 4096
 MEDIA_TYPES = ("image", "document", "audio", "video", "sticker")
 IGNORED_TYPES = ("reaction", "system", "unsupported_ignored")
+MAX_BUBBLES = 4
+# Reacting straight away shows the user their file arrived while it is still being read.
+REACTIONS = {"audio": "🎧", "image": "👀", "video": "👀", "document": "📄"}
 # WhatsApp only accepts some document types; everything we generate is sent as one of these.
 OUTGOING_MIME = {
     ".pdf": "application/pdf",
@@ -102,6 +105,12 @@ class WhatsAppClient:
         self._request(f"{self.base}/{self.phone_number_id}/messages", {
             "messaging_product": "whatsapp", "status": "read",
             "message_id": message_id, "typing_indicator": {"type": "text"},
+        })
+
+    def react(self, to: str, message_id: str, emoji: str) -> None:
+        self._request(f"{self.base}/{self.phone_number_id}/messages", {
+            "messaging_product": "whatsapp", "recipient_type": "individual",
+            "to": to, "type": "reaction", "reaction": {"message_id": message_id, "emoji": emoji},
         })
 
     def download_media(self, media_id: str) -> tuple[bytes, str]:
@@ -221,15 +230,17 @@ class WhatsAppChannel:
         try:
             try:
                 self.client.mark_read_and_typing(message["id"])
+                if message.get("type") in REACTIONS:
+                    self.client.react(sender, message["id"], REACTIONS[message["type"]])
             except (urllib.error.URLError, KeyError) as e:
-                log.info("Could not show the typing indicator: %s", e)
+                log.info("Could not show the typing indicator or react: %s", e)
             uid = f"wa-{sender}"
             content = self._content_of(uid, message)
             if content is None:
                 return
             text, attachments, button = content
             reply = self.agent.handle(uid, text, channel="whatsapp", attachments=attachments, button=button)
-            for part in split_drafts(reply.text):
+            for part in split_drafts(reply.text, bubbles=MAX_BUBBLES):
                 self.client.send_text(sender, part)
             for path in reply.files:
                 self.client.send_document(sender, path)

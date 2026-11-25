@@ -22,6 +22,11 @@ class SkillLibraryTest(unittest.TestCase):
         self.assertIn('<file name="slop.json">', human)
         self.assertNotIn("def humanize", human)
 
+    def test_x_post_never_blocks_on_samples(self):
+        body = self.library.get("x-post").body()
+        self.assertIn("never hold back a draft", body)
+        self.assertNotIn("ask for two or three of their own posts", body)
+
     def test_folded_description(self):
         meta = parse_frontmatter("---\nname: a\ndescription: >-\n  one\n  two\n---\nbody")
         self.assertEqual(meta, {"name": "a", "description": "one two"})

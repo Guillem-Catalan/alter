@@ -1,6 +1,6 @@
 # Spec: the agent platform (actions, confirmations, connections, web, schedules)
 
-Date: 2026-11-24 · Status: build order step 1 (tools, agent loop, cards, SQLite, keychain, connector interface) built; the rest pending · Decisions: ADR 0001-0006
+Date: 2026-11-24 · Status: build order step 1 (tools, agent loop, cards, SQLite, keychain, connector interface) built; the rest pending · Decisions: ADR 0001-0007
 
 ## Goal
 Turn Alter from a writing assistant into a personal social media agent you talk to on WhatsApp: it reads from
@@ -59,7 +59,8 @@ class Tool:
   with a random per-call boundary (any boundary-like text inside is neutralised), and the system prompt says it
   is never instructions.
 - Once a turn has read untrusted content, tools that change the user's memory (profile, preferences, voice
-  samples, published log) are refused for the rest of that turn; the model must ask the user.
+  samples, published log) are refused while that content is in the conversation history; `new chat` clears it. Stored text (voice,
+  preferences, posts) is neutralised before it goes inside the system prompt's tags.
 
 ### Pending actions and confirmation
 - Calling an act tool validates the input, stores a pending action `{id, user, tool, input, preview, status,
@@ -130,6 +131,14 @@ Alter never creates a report or reminder on its own; it may offer one in a reply
 says yes. Every active report is listed on the web and can be stopped from WhatsApp ("stop the reports"). Messages that start a
 conversation outside WhatsApp's 24-hour window need an approved template: the first version only notifies inside
 the window and shows the rest in the web's Activity page; templates are a later decision.
+
+### Voice (ADR 0007)
+- One profile per user (`voice_profile.md`), written by the model through `update_voice_profile` from the user's
+  own chat messages, published posts, samples and corrections; previous versions kept for undo.
+- The system prompt gives default registers per channel (X, LinkedIn, Instagram, YouTube, email, WhatsApp) and
+  the profile's channel notes override them. No draft waits for samples.
+- Code marks the profile as due after the user's 3rd message and every 15 messages after an update. It is a
+  memory tool, so it is refused (and not requested) while untrusted text is in the conversation.
 
 ### Performance, comments and reach (ADR 0005)
 - Read tools per connector: `<network>_post_metrics`, `<network>_post_comments`, `<network>_recent_posts`.

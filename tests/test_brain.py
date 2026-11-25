@@ -50,6 +50,49 @@ class AgentTest(unittest.TestCase):
         agent.handle("u1", "another one")
         self.assertIn('<skill name="li-post"', "\n".join(llm.calls[-1][0]))
 
+    def test_one_voice_profile_for_every_channel(self):
+        profile = "## Tone\nCasual, build in public.\n## Never says\nleverage, synergy"
+        agent, llm = self.start(call("update_voice_profile", profile=profile), "Noted", "ok")
+        agent.handle("u1", "I never say leverage, write like I talk")
+        self.assertEqual(self.store.voice_profile(), profile + "\n")
+        agent.handle("u1", "a LinkedIn post and a tweet about it")
+        system = "\n".join(llm.calls[-1][0])
+        self.assertIn(f"<voice_profile>\n{profile}", system)
+        self.assertIn("Never keep a separate voice per network", system)
+        self.assertIn("email is more formal", system)
+        self.assertIn("Never hold back a draft to ask for samples", system)
+
+    def test_voice_profile_is_requested_when_due(self):
+        from agent.store import VOICE_FIRST_AFTER, VOICE_REFRESH_EVERY
+        agent, llm = self.start(*["ok"] * 40)
+        due = lambda: "VOICE PROFILE DUE" in llm.calls[-1][0][1]
+        agent.handle("u1", "one")  # the setup message counted as the first
+        self.assertEqual(due(), 2 >= VOICE_FIRST_AFTER)
+        agent.handle("u1", "two")
+        self.assertTrue(due())
+        self.store.save_voice_profile("## Tone\nCasual and direct, short sentences, build in public.")
+        agent.handle("u1", "three")
+        self.assertFalse(due())
+        for i in range(VOICE_REFRESH_EVERY):
+            agent.handle("u1", f"more {i}")
+        self.assertTrue(due())
+
+    def test_voice_profile_keeps_previous_versions(self):
+        from agent.store import VOICE_HISTORY_LIMIT
+        self.start()
+        for i in range(VOICE_HISTORY_LIMIT + 3):
+            self.store.save_voice_profile(f"version {i}")
+        versions = sorted((self.store.dir / "voice_profile_history").glob("*.md"))
+        self.assertEqual(len(versions), VOICE_HISTORY_LIMIT)
+        self.assertEqual(versions[-1].read_text(), f"version {VOICE_HISTORY_LIMIT + 1}\n")
+        self.assertEqual(self.store.voice_profile(), f"version {VOICE_HISTORY_LIMIT + 2}\n")
+
+    def test_voice_profile_too_short_is_rejected(self):
+        agent, llm = self.start(call("update_voice_profile", profile="casual"), "ok")
+        agent.handle("u1", "remember my voice")
+        self.assertEqual(self.store.voice_profile(), "")
+        self.assertTrue(self.tool_results(llm)[0]["is_error"])
+
     def test_unknown_tool_and_bad_input_go_back_as_errors(self):
         agent, llm = self.start(Turn("", [ToolCall("a", "fly_to_mars", {}),
                                           ToolCall("b", "log_published", {"network": "myspace", "text": "x"})]), "Sorry")
@@ -57,6 +100,13 @@ class AgentTest(unittest.TestCase):
         results = self.tool_results(llm)
         self.assertTrue(all(r["is_error"] for r in results))
         self.assertIn("must be one of", results[1]["content"])
+
+    def test_text_written_with_tool_calls_is_kept(self):
+        agent, _ = self.start(Turn("Here is the email:\n```\nHi Sam, it works.\n```", [
+            ToolCall("v", "remember_preference", {"preference": "short emails"})]), "Saved your style too.")
+        reply = agent.handle("u1", "short email to my partner")
+        self.assertIn("Hi Sam, it works.", reply.text)
+        self.assertTrue(reply.text.endswith("Saved your style too."))
 
     def test_tool_loop_is_capped(self):
         agent, llm = self.start(*[call("capabilities")] * 20)
@@ -120,7 +170,7 @@ class AgentTest(unittest.TestCase):
         agent, _, tmp = make_agent(language="es")
         self.addCleanup(tmp.cleanup)
         self.addCleanup(agent.db.close)
-        self.assertIn("Hola", agent.handle("u2", "hola").text)
+        self.assertIn("¿cómo te llamas", agent.handle("u2", "hola").text)
 
 
 class SplitDraftsTest(unittest.TestCase):
@@ -130,6 +180,19 @@ class SplitDraftsTest(unittest.TestCase):
 
     def test_plain_text(self):
         self.assertEqual(split_drafts("just chat"), ["just chat"])
+        self.assertEqual(split_drafts("one\n\ntwo"), ["one\n\ntwo"])
+
+    def test_bubbles(self):
+        text = "Nice one\n\nHere you go:\n```\nPost\n```\nA\n\nB\n\nC\n\nD\n\nE"
+        self.assertEqual(split_drafts(text, bubbles=4), ["Nice one", "Here you go:", "Post", "A", "B", "C", "D\n\nE"])
+
+    def test_profile_without_handles(self):
+        agent, llm, tmp = make_agent(call("set_profile", name="Ana", context="Building a CRM"), "Nice, Ana")
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(agent.db.close)
+        agent.handle("u3", "hi")
+        agent.handle("u3", "Ana, building a CRM")
+        self.assertEqual(UserStore(agent.data_dir, "u3").profile()["name"], "Ana")
 
 
 if __name__ == "__main__":

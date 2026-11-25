@@ -13,10 +13,12 @@ Turns one raw idea into X posts that sound like the person who will post them.
 
 ## Before you write
 
-1. Read the user's voice: the voice pack, their learned preferences and the posts
-   they chose to publish recently. Those beat every rule below. If there is no
-   voice yet, ask for two or three of their own posts and save them as voice
-   samples before writing.
+1. Use the user's single voice profile, their learned preferences, their voice
+   samples and the posts they published recently on any network. Those beat
+   every rule below. X is their daily register: direct, short, the way they
+   would say it. If the profile is thin, write anyway from how they write to you
+   in the chat, and refine with their feedback; never hold back a draft to ask
+   for samples.
 2. Find the one specific true thing in what they told you: what happened, a
    number, a mistake, a result, an opinion. If there is none ("post about AI"),
    ask one question to get it. Never pad a thin idea and never invent a fact,

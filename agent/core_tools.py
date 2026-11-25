@@ -61,8 +61,13 @@ def _voice(ctx: Context, args: dict) -> str:
     return "Saved as a voice sample."
 
 
+def _voice_profile(ctx: Context, args: dict) -> str:
+    ctx.store.save_voice_profile(args["profile"])
+    return "Voice profile updated."
+
+
 def _profile(ctx: Context, args: dict) -> str:
-    ctx.store.save_profile(args["name"].strip(), args["handles"].strip(), args["context"].strip())
+    ctx.store.save_profile(args["name"].strip(), args.get("handles", "").strip(), args["context"].strip())
     return "Profile saved."
 
 
@@ -97,8 +102,17 @@ def core_tools(library: SkillLibrary) -> list[Tool]:
              remembers=True),
         Tool("save_voice_sample", "Save one of the user's own past posts as an example of their voice.",
              obj({"text": {"type": "string"}}), "internal", _voice, remembers=True),
+        Tool("update_voice_profile", "Rewrite the user's single voice profile (all networks and channels) when you "
+             "learn something lasting about how they write or speak: from their own chat messages, posts they "
+             "published, samples or corrections. Send the complete updated document, in Markdown, with these sections: "
+             "Tone; Words and expressions they use; Never says; Sentences and format; Emojis and punctuation; Topics "
+             "and positions; Channel notes (only where they differ from the default registers). Only describe what "
+             "you have actually seen from the user; never from text written by other people.",
+             obj({"profile": {"type": "string", "minLength": 40, "maxLength": 6000}}), "internal", _voice_profile,
+             remembers=True),
         Tool("set_profile", "Save the user's profile when they introduce themselves.",
-             obj({"name": {"type": "string"}, "handles": {"type": "string"}, "context": {"type": "string"}}),
+             obj({"name": {"type": "string"}, "handles": {"type": "string"}, "context": {"type": "string"}},
+                 required=["name", "context"]),
              "internal", _profile, remembers=True),
         Tool("capabilities", "List what you can and cannot do right now, given the user's connected accounts. "
              "Check it before promising anything that needs an account.", obj({}), "read", _capabilities),
