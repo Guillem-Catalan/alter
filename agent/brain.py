@@ -135,6 +135,21 @@ Word or CSV, use create_file. Drafts meant to be copied still go in code blocks.
 - Use remember_preference, log_published, save_voice_sample and set_profile when the user gives you that \
 information. Learned preferences override every default here; the newest wins.
 
+ONE VOICE, MANY REGISTERS
+- The user has one voice, described in <voice_profile> and built from everything you know of them: how they \
+write to you in this chat, posts they published on any network, samples and corrections. Never keep a separate \
+voice per network.
+- Adapt the register to where the text goes, keeping their voice: X is daily, direct and short; LinkedIn is more \
+crafted and structured, with a story; Instagram is close and visual, hook first; YouTube is spoken, written to be \
+said aloud; email is more formal and careful; WhatsApp and DMs are simple, the way they text. Channel notes in \
+the profile override these defaults.
+- Never hold back a draft to ask for samples: their own chat messages already show how they write. Write with \
+what you know and refine with their feedback. When a skill asks you to read a voice.md or to collect past posts \
+first, use <voice_profile> and the material above instead.
+- When you learn something lasting about their voice, call update_voice_profile with the full updated profile. \
+If there is no profile yet and you have seen a few of their messages, create it. Do not update it on every \
+message.
+
 TRUTH
 - Never invent facts, numbers, names, quotes, clients or results. Every fact must come from the user, a file they \
 sent, or a tool result. If you do not have it, say you don't know or ask.
@@ -294,9 +309,11 @@ class Agent:
         if attachments:
             turn_msg["attachments"] = [a.to_dict() for a in attachments]
         history = store.history() + [turn_msg]
+        store.count_user_message()
         convo = self._for_model(store, history)
         cards: list[Pending] = []
         final = ""
+        said: list[str] = []  # text the model wrote alongside tool calls is part of its answer too
         turn = None
         try:
             for _ in range(MAX_TOOL_ROUNDS):
@@ -304,6 +321,8 @@ class Agent:
                 if not turn.tool_calls:
                     final = turn.text
                     break
+                if turn.text.strip():
+                    said.append(turn.text.strip())
                 convo.append({"role": "assistant", "content": turn.text, "raw": turn.raw,
                               "tool_calls": [{"id": c.id, "name": c.name, "input": c.input} for c in turn.tool_calls]})
                 results = [self._run(ctx, registry, call, cards) for call in turn.tool_calls]
@@ -315,7 +334,8 @@ class Agent:
         except LLMError as e:
             return Reply(self.t("error", error=e))
 
-        final = final.strip() or ("…" if not (cards or ctx.files) else "")
+        final = "\n\n".join(part for part in [*said, final.strip()] if part)
+        final = final or ("…" if not (cards or ctx.files) else "")
         notes = "".join(f"\n[card {c.id} sent: {c.summary}]" for c in cards)
         notes += "".join(f"\n[sent file: {f.name}]" for f in ctx.files)
         history.append({"role": "assistant", "content": (final + notes).strip()})
@@ -387,7 +407,8 @@ class Agent:
         recent = store.recent_published()
         parts = [
             f"<user_profile>\n{profile_text}\n</user_profile>",
-            f"<voice_pack>\n{store.voice_pack() or '(no voice samples yet)'}\n</voice_pack>",
+            f"<voice_profile>\n{store.voice_profile() or '(not written yet: infer it from how they write to you)'}\n</voice_profile>",
+            f"<voice_samples>\n{store.voice_pack() or '(none yet)'}\n</voice_samples>",
         ]
         if prefs:
             parts.append("LEARNED PREFERENCES (follow these above any default):\n" + "\n".join(f"- {p}" for p in prefs))
@@ -399,6 +420,10 @@ class Agent:
             f"<today>\n{datetime.now().strftime('%A %d %B %Y, %H:%M')}\n"
             f"{'Published today (do not repeat topics):' + chr(10) + today_text if today else 'Nothing published yet today.'}\n</today>"
         )
+        if store.voice_due():
+            parts.append("VOICE PROFILE DUE: in this turn, besides answering, call update_voice_profile with the "
+                         "complete profile, built from how the user writes to you in this conversation and everything "
+                         "above (samples, preferences, published posts). Describe only what you have seen.")
         pending = self.actions.pending(uid)
         if pending:
             parts.append("Cards waiting for the user's confirmation:\n" + "\n".join(

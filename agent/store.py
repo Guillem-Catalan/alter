@@ -11,6 +11,9 @@ HISTORY_LIMIT = 30
 PREFERENCES_LIMIT = 20
 PUBLISHED_LOG_LIMIT = 50
 ACTIVE_SKILLS_LIMIT = 3
+VOICE_HISTORY_LIMIT = 10
+VOICE_FIRST_AFTER = 3    # user messages before the first voice profile
+VOICE_REFRESH_EVERY = 15  # user messages between refreshes
 
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -111,6 +114,39 @@ class UserStore:
             if f.suffix in (".md", ".txt")
         ]
         return "\n\n".join(chunks)
+
+    # message counter, to know when the voice profile is due
+    def count_user_message(self) -> int:
+        stats = self._load("stats.json", {"user_messages": 0, "voice_at": None})
+        stats["user_messages"] += 1
+        self._save("stats.json", stats)
+        return stats["user_messages"]
+
+    def voice_due(self) -> bool:
+        stats = self._load("stats.json", {"user_messages": 0, "voice_at": None})
+        if not self.voice_profile():
+            return stats["user_messages"] >= VOICE_FIRST_AFTER
+        return stats["voice_at"] is None or stats["user_messages"] - stats["voice_at"] >= VOICE_REFRESH_EVERY
+
+    # the user's single voice profile, shared by every network and channel
+    def voice_profile(self) -> str:
+        path = self.dir / "voice_profile.md"
+        return path.read_text() if path.exists() else ""
+
+    def save_voice_profile(self, text: str) -> None:
+        """Replace the profile, keeping the last versions so a bad update can be undone."""
+        path = self.dir / "voice_profile.md"
+        history = self.dir / "voice_profile_history"
+        if path.exists():
+            history.mkdir(exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            (history / f"{stamp}.md").write_text(path.read_text())
+            for old in sorted(history.glob("*.md"))[:-VOICE_HISTORY_LIMIT]:
+                old.unlink()
+        path.write_text(text.strip() + "\n")
+        stats = self._load("stats.json", {"user_messages": 0, "voice_at": None})
+        stats["voice_at"] = stats["user_messages"]
+        self._save("stats.json", stats)
 
     def add_voice_sample(self, text: str) -> None:
         path = self.dir / "voice_pack" / "samples.md"

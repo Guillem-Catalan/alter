@@ -27,3 +27,4 @@ The reasons come from whoever decides; they are never made up afterwards.
 | [0004](0004-sqlite-and-os-keychain.md) | SQLite for agent state, the OS keychain for connection secrets |
 | [0005](0005-facts-come-from-data.md) | Facts and numbers come from data; reach estimates are computed from the user's own history |
 | [0006](0006-hybrid-access-api-first.md) | Official APIs for acting; the user's browser session only for read-only gaps, opt-in per network |
+| [0007](0007-one-voice-per-user.md) | One voice profile per user, adapted to each channel |
