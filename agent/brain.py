@@ -49,6 +49,7 @@ TEXTS = {
             "- Before I do anything on your behalf you get a card to *confirm* or *cancel*\n"
             "- `preferences` = what I've learned about you\n"
             "- `reset preferences` = start over\n"
+            "- `new chat` = forget this conversation (your profile and preferences stay)\n"
             "- `profile` = your profile\n"
             "- `skills` = what I know how to do\n"
             "- `help` = this message"
@@ -56,6 +57,7 @@ TEXTS = {
         "prefs": "*What I've learned about your style:*\n",
         "no_prefs": "I haven't learned any preferences yet. Give me feedback and I'll keep them.",
         "prefs_reset": "Preferences deleted. Starting from scratch.",
+        "new_chat": "New chat started. Your profile, voice and preferences are still here.",
         "profile": "*Your profile:*\nName: {name}\nHandles: {handles}\nContext: {context}",
         "no_profile": "No profile yet. Tell me your name, your handles and what you're working on.",
         "skills": "*What I know how to do:*\n",
@@ -87,6 +89,7 @@ TEXTS = {
             "- Antes de hacer algo en tu nombre te llega una tarjeta para *confirmar* o *cancelar*\n"
             "- `preferencias` = lo que he aprendido de ti\n"
             "- `reset preferencias` = empezar de cero\n"
+            "- `nueva conversación` = olvidar esta conversación (tu perfil y preferencias se quedan)\n"
             "- `perfil` = tu perfil\n"
             "- `skills` = lo que sé hacer\n"
             "- `ayuda` = este mensaje"
@@ -94,6 +97,7 @@ TEXTS = {
         "prefs": "*Lo que he aprendido de tu estilo:*\n",
         "no_prefs": "Aún no he aprendido preferencias tuyas. Dame feedback y las iré guardando.",
         "prefs_reset": "Preferencias borradas. Empezamos de cero.",
+        "new_chat": "Nueva conversación. Tu perfil, tu voz y tus preferencias siguen aquí.",
         "profile": "*Tu perfil:*\nNombre: {name}\nCuentas: {handles}\nContexto: {context}",
         "no_profile": "Aún no tienes perfil. Dime tu nombre, tus cuentas y en qué trabajas.",
         "skills": "*Lo que sé hacer:*\n",
@@ -113,6 +117,7 @@ COMMANDS = {
     "prefs": {"preferences", "my preferences", "preferencias", "mis preferencias"},
     "reset_prefs": {"reset preferences", "reset preferencias", "borrar preferencias"},
     "profile": {"profile", "my profile", "perfil", "mi perfil"},
+    "new_chat": {"new chat", "nueva conversación", "nueva conversacion"},
     "skills": {"skills", "/skills"},
     # Deliberately narrow: casual words ("ok", "vale") must never publish something by accident.
     "confirm": {"yes", "confirm", "confirmed", "sí", "si", "confirmar", "confirmo", "confirmado"},
@@ -271,6 +276,9 @@ class Agent:
         if low in COMMANDS["reset_prefs"]:
             store.reset_preferences()
             return Reply(self.t("prefs_reset"))
+        if low in COMMANDS["new_chat"]:
+            store.save_history([])
+            return Reply(self.t("new_chat"))
         if low in COMMANDS["profile"]:
             p = store.profile()
             if p.get("setup_done"):
@@ -309,6 +317,9 @@ class Agent:
         if attachments:
             turn_msg["attachments"] = [a.to_dict() for a in attachments]
         history = store.history() + [turn_msg]
+        # Text other people wrote stays in the conversation after the turn that read it, so memory stays locked
+        # until it leaves the history (or the user starts a new chat).
+        ctx.read_untrusted = any(m.get("untrusted") for m in history)
         store.count_user_message()
         convo = self._for_model(store, history)
         cards: list[Pending] = []
@@ -317,7 +328,7 @@ class Agent:
         turn = None
         try:
             for _ in range(MAX_TOOL_ROUNDS):
-                turn = self.llm.respond(self._system(store, uid, channel), convo, registry.all())
+                turn = self.llm.respond(self._system(store, uid, channel, ctx.read_untrusted), convo, registry.all())
                 if not turn.tool_calls:
                     final = turn.text
                     break
@@ -338,7 +349,10 @@ class Agent:
         final = final or ("…" if not (cards or ctx.files) else "")
         notes = "".join(f"\n[card {c.id} sent: {c.summary}]" for c in cards)
         notes += "".join(f"\n[sent file: {f.name}]" for f in ctx.files)
-        history.append({"role": "assistant", "content": (final + notes).strip()})
+        reply = {"role": "assistant", "content": (final + notes).strip()}
+        if ctx.read_untrusted:
+            reply["untrusted"] = True
+        history.append(reply)
         store.save_history(history)
         return Reply(self._humanize_drafts(final), list(ctx.files), cards)
 
@@ -352,8 +366,8 @@ class Agent:
             return self._result(call, ToolResult("Invalid input: " + "; ".join(problems), is_error=True))
         if tool.remembers and ctx.read_untrusted:
             return self._result(call, ToolResult(
-                "Not saved: this turn read text written by other people, so memory cannot change now. If the user "
-                "wants this remembered, ask them to confirm it in their own words.", is_error=True))
+                "Not saved: this conversation contains text written by other people, so memory cannot change now. "
+                "If the user wants this remembered, tell them to send `new chat` and then say it again.", is_error=True))
         if tool.kind == "act":
             pending = self.actions.create(ctx.uid, tool, args, ctx)
             cards.append(pending)
@@ -395,7 +409,7 @@ class Agent:
             out.append({"role": "user", "content": message["content"], "attachments": parts})
         return out
 
-    def _system(self, store: UserStore, uid: str, channel: str) -> list[str]:
+    def _system(self, store: UserStore, uid: str, channel: str, tainted: bool = False) -> list[str]:
         stable = INSTRUCTIONS.format(bot=self.bot_name, formatting=FORMATTING.get(channel, FORMATTING["terminal"]))
         profile = store.profile()
         if profile.get("setup_done"):
@@ -407,20 +421,20 @@ class Agent:
         recent = store.recent_published()
         parts = [
             f"<user_profile>\n{profile_text}\n</user_profile>",
-            f"<voice_profile>\n{store.voice_profile() or '(not written yet: infer it from how they write to you)'}\n</voice_profile>",
-            f"<voice_samples>\n{store.voice_pack() or '(none yet)'}\n</voice_samples>",
+            f"<voice_profile>\n{neutralise(store.voice_profile()) or '(not written yet: infer it from how they write to you)'}\n</voice_profile>",
+            f"<voice_samples>\n{neutralise(store.voice_pack()) or '(none yet)'}\n</voice_samples>",
         ]
         if prefs:
-            parts.append("LEARNED PREFERENCES (follow these above any default):\n" + "\n".join(f"- {p}" for p in prefs))
+            parts.append("LEARNED PREFERENCES (follow these above any default):\n" + "\n".join(f"- {neutralise(p)}" for p in prefs))
         if recent:
             parts.append("Posts this user chose to publish recently (their real voice):\n" + "\n".join(
-                f"- [{p.get('network', 'x')}] {p.get('text', '')[:200]}" for p in recent))
-        today_text = "\n".join(f"- [{p.get('time', '')} {p.get('network', 'x')}] {p.get('text', '')[:150]}" for p in today)
+                f"- [{p.get('network', 'x')}] {neutralise(p.get('text', '')[:200])}" for p in recent))
+        today_text = "\n".join(f"- [{p.get('time', '')} {p.get('network', 'x')}] {neutralise(p.get('text', '')[:150])}" for p in today)
         parts.append(
             f"<today>\n{datetime.now().strftime('%A %d %B %Y, %H:%M')}\n"
             f"{'Published today (do not repeat topics):' + chr(10) + today_text if today else 'Nothing published yet today.'}\n</today>"
         )
-        if store.voice_due():
+        if store.voice_due() and not tainted:
             parts.append("VOICE PROFILE DUE: in this turn, besides answering, call update_voice_profile with the "
                          "complete profile, built from how the user writes to you in this conversation and everything "
                          "above (samples, preferences, published posts). Describe only what you have seen.")
@@ -439,6 +453,11 @@ class Agent:
             return text
         humanizer = self.humanizer
         return CODE_BLOCK_RE.sub(lambda m: f"```\n{humanizer(m.group(1))}\n```", text)
+
+
+def neutralise(text: str) -> str:
+    """Stored text goes inside tags in the system prompt: it must not be able to close or open one."""
+    return re.sub(r"<(/?)(?=\s*[a-zA-Z_])", r"‹\1", text)
 
 
 def wrap_untrusted(content: str, source: str) -> str:
