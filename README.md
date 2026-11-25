@@ -71,6 +71,17 @@ Set `ANTHROPIC_API_KEY` (default provider, model `claude-opus-5-5`), or:
 | Anthropic API | `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`, optional `LLM_MODEL` |
 | Azure (Anthropic-compatible) | `LLM_PROVIDER=azure`, `AZURE_CLAUDE_ENDPOINT`, `AZURE_CLAUDE_API_KEY`, `AZURE_CLAUDE_DEPLOYMENT` |
 | OpenAI-compatible | `LLM_PROVIDER=openai`, `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `LLM_MODEL` |
+| Your Claude plan, through Claude Code | `LLM_PROVIDER=claude-code`, optional `LLM_MODEL` (`sonnet`, `opus`) |
+
+**Using your Claude plan.** With `claude-code`, Alter runs your own installed and signed-in
+[Claude Code](https://claude.com/claude-code) (`claude -p`) with no built-in tools and no settings, so usage
+counts against your Claude plan instead of an API key. Alter never reads, stores or asks for your Claude login:
+sign in once with `claude` yourself, and `main.py doctor` checks it. Anthropic's terms describe plan usage for
+ordinary, individual use of Claude Code; check them and use this only for yourself. Each reply takes a few
+seconds longer than with the API.
+
+**When the limit is reached.** Set `LLM_FALLBACK_PROVIDER` (for example `anthropic` with an API key) and Alter
+answers with it while your plan is at its limit. Without one, Alter replies with the provider's own limit message.
 
 ### WhatsApp
 

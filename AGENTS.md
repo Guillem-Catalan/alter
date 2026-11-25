@@ -8,7 +8,9 @@ CSV). Open source: anyone clones it and runs it with their own keys. User-facing
 - Python 3.10+, stdlib + `anthropic` (official SDK), `fpdf2` and `python-docx` (create files), `pypdf` and
   `defusedxml` (read them). `slack-bolt` only for the optional Slack channel.
 - Model: `LLM_PROVIDER` = `anthropic` (default, `claude-opus-5-5` with server-side refusal fallback), `azure`
-  (Anthropic-compatible endpoint) or `openai` (any OpenAI-compatible API).
+  (Anthropic-compatible endpoint), `openai` (any OpenAI-compatible API) or `claude-code` (the user's own signed-in
+  Claude Code via `claude -p` and structured output; never touch its credentials). `LLM_FALLBACK_PROVIDER` answers
+  when the main one hits its usage limit.
 - Voice: whisper.cpp (`whisper-cli`) + ffmpeg, locally. WhatsApp: Meta Cloud API webhook + a tunnel (ngrok).
 
 ## Layout

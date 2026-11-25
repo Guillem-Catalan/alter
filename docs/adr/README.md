@@ -21,7 +21,7 @@ The reasons come from whoever decides; they are never made up afterwards.
 
 | ADR | Decision |
 |---|---|
-| [0001](0001-native-tool-use.md) | Actions are native tool calls, bridged through MCP for the Claude Code provider |
+| [0001](0001-native-tool-use.md) | Actions are native tool calls; Claude Code requests them through structured output |
 | [0002](0002-always-confirm-with-preview.md) | Every action on the user's behalf needs confirmation; public ones come with a preview image |
 | [0003](0003-web-on-fastapi-with-magic-links.md) | One FastAPI server for the webhook and the web, reached through a magic link sent on WhatsApp |
 | [0004](0004-sqlite-and-os-keychain.md) | SQLite for agent state, the OS keychain for connection secrets |

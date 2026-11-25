@@ -9,7 +9,7 @@ you confirm, and reports how your posts perform with real data, never invented. 
 
 ## Scope
 1. **Tool registry and agent loop** (ADR 0001): every capability is a tool; provider adapters for Anthropic,
-   Azure, OpenAI-compatible and Claude Code (MCP bridge).
+   Azure, OpenAI-compatible and Claude Code (structured output).
 2. **Pending actions and confirmation cards** (ADR 0002), with preview images for public actions.
 3. **Connector interface**: a common shape for every integration, with read and act tools.
 4. **State and secrets** (ADR 0004): SQLite in the data folder, secrets in the OS keychain, audit log.
@@ -36,7 +36,7 @@ you confirm, and reports how your posts perform with real data, never invented. 
 WhatsApp ─┐                         ┌─ tools: core (skills, files, memory)
 Web ──────┼─> FastAPI app ─> Agent ─┼─ tools: connectors (read / act)
 Scheduler ┘        │          │     └─ pending actions ─> confirmation card ─> executor ─> audit log
-                   │          └─ model adapters: anthropic · azure · openai · claude-code (MCP)
+                   │          └─ model adapters: anthropic · azure · openai · claude-code
                    └─ SQLite (data folder) + OS keychain (secrets)
 ```
 
@@ -144,9 +144,11 @@ the window and shows the rest in the web's Activity page; templates are a later 
 - The system prompt forbids stating facts without a source and requires saying "I don't know" or asking.
 
 ### Model providers
-`claude-code` runs the user's installed, unmodified Claude Code with `-p`, no built-in tools, no user settings,
-and Alter's MCP server; Alter never reads or stores Claude credentials. When it reports a usage limit, Alter uses
-`LLM_FALLBACK_PROVIDER` if set, or relays Claude's own limit message.
+`claude-code` runs the user's installed, unmodified Claude Code with `-p`, no built-in tools, no user settings and
+no MCP servers, from an empty working folder and without API keys in its environment. Alter's tools are described
+in the system prompt and requested through structured output (`--json-schema`); Alter runs them. Alter never reads
+or stores Claude credentials; `doctor` only asks the CLI whether it is signed in. When it reports a usage limit,
+Alter uses `LLM_FALLBACK_PROVIDER` if set, or relays Claude's own limit message.
 
 ## Risks
 | Risk | Mitigation |
@@ -178,6 +180,6 @@ and Alter's MCP server; Alter never reads or stores Claude credentials. When it 
 ## Build order
 1. Tool registry, agent loop and provider adapters (replacing tags), SQLite, pending actions and cards. Base for
    everything else, built first in a single session.
-2. In parallel afterwards: Claude Code provider and MCP bridge · web app and magic links · LinkedIn · X ·
+2. In parallel afterwards: Claude Code provider · web app and magic links · LinkedIn · X ·
    Granola · Google Workspace · previews · installer.
 3. Reports on request and reach estimates (need connectors with metrics). Instagram and YouTube connectors.
