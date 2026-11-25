@@ -1,8 +1,9 @@
 # Alter
 
-**Your alter ego for social media.** A self-hosted assistant that lives in your WhatsApp and helps you publish on **X, LinkedIn, Instagram and YouTube**.
-Send it an idea by text or **voice note**, and it turns it into posts in *your* voice. It learns from every
-correction, and it never does anything on your behalf without your confirmation: drafts arrive one per
+**Your alter ego for communication.** A self-hosted specialist that lives in your WhatsApp, catches how you talk
+and writes in *your* voice: posts for **X, LinkedIn, Instagram and YouTube**, and emails or messages too.
+Send it an idea by text or **voice note** and it turns it into something that sounds like you. It learns from
+everything you tell it, and it never does anything on your behalf without your confirmation: drafts arrive one per
 message, ready to copy, and every action comes as a card you confirm or cancel.
 
 - **Runs on your machine.** Your chats, style and voice notes stay in a private folder on your computer, outside

@@ -170,7 +170,7 @@ class AgentTest(unittest.TestCase):
         agent, _, tmp = make_agent(language="es")
         self.addCleanup(tmp.cleanup)
         self.addCleanup(agent.db.close)
-        self.assertIn("Hola", agent.handle("u2", "hola").text)
+        self.assertIn("¿cómo te llamas", agent.handle("u2", "hola").text)
 
 
 class SplitDraftsTest(unittest.TestCase):
@@ -180,6 +180,19 @@ class SplitDraftsTest(unittest.TestCase):
 
     def test_plain_text(self):
         self.assertEqual(split_drafts("just chat"), ["just chat"])
+        self.assertEqual(split_drafts("one\n\ntwo"), ["one\n\ntwo"])
+
+    def test_bubbles(self):
+        text = "Nice one\n\nHere you go:\n```\nPost\n```\nA\n\nB\n\nC\n\nD\n\nE"
+        self.assertEqual(split_drafts(text, bubbles=4), ["Nice one", "Here you go:", "Post", "A", "B", "C", "D\n\nE"])
+
+    def test_profile_without_handles(self):
+        agent, llm, tmp = make_agent(call("set_profile", name="Ana", context="Building a CRM"), "Nice, Ana")
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(agent.db.close)
+        agent.handle("u3", "hi")
+        agent.handle("u3", "Ana, building a CRM")
+        self.assertEqual(UserStore(agent.data_dir, "u3").profile()["name"], "Ana")
 
 
 if __name__ == "__main__":

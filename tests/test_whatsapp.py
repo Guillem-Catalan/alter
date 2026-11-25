@@ -150,10 +150,17 @@ class WhatsAppTest(WhatsAppBase):
         self.assertEqual(self.post(payload({"from": OWNER, "id": "m3", "type": "audio", "audio": {"id": "media-1"}})), 200)
         self.wait()
         bodies = self.bodies()
+        # The welcome arrives as short messages, like someone texting.
         self.assertIn("TestBot", bodies[0])
-        self.assertEqual(bodies[1], "Hi Ana")
+        self.assertEqual(len(bodies[:4]), 4)
+        self.assertIn("what's your name", bodies[3])
+        self.assertEqual(bodies[4], "Hi Ana")
         # Each draft arrives as its own message, without backticks.
-        self.assertEqual(bodies[2:], ["Two drafts:", "Post one", "Post two", "Go with one."])
+        self.assertEqual(bodies[5:], ["Two drafts:", "Post one", "Post two", "Go with one."])
+        # The voice note gets a reaction straight away; text messages do not.
+        reactions = [m for m in self.graph.sent if m["type"] == "reaction"]
+        self.assertEqual(reactions, [{"messaging_product": "whatsapp", "recipient_type": "individual", "to": OWNER,
+                                      "type": "reaction", "reaction": {"message_id": "m3", "emoji": "🎧"}}])
         self.assertEqual(self.heard, [(b"OGGDATA", ".ogg")])
         voice = self.last_user_message()["attachments"][0]
         self.assertEqual((voice["kind"], voice["text"]), ("audio", "make a tweet about shipping"))
@@ -170,7 +177,7 @@ class WhatsAppTest(WhatsAppBase):
         self.post(payload({"from": OWNER, "id": "m1", "type": "text", "text": {"body": "hi"}}))
         self.post(payload({"from": OWNER, "id": "m1", "type": "text", "text": {"body": "hi"}}))
         self.wait()
-        self.assertEqual(len(self.graph.sent), 1)
+        self.assertEqual(len(self.graph.sent), 4)  # one welcome, in four short messages
 
     def test_unsupported_message_type(self):
         self.post(payload({"from": OWNER, "id": "l1", "type": "location", "location": {"latitude": 1}}))

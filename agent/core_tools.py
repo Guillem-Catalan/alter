@@ -67,7 +67,7 @@ def _voice_profile(ctx: Context, args: dict) -> str:
 
 
 def _profile(ctx: Context, args: dict) -> str:
-    ctx.store.save_profile(args["name"].strip(), args["handles"].strip(), args["context"].strip())
+    ctx.store.save_profile(args["name"].strip(), args.get("handles", "").strip(), args["context"].strip())
     return "Profile saved."
 
 
@@ -111,7 +111,8 @@ def core_tools(library: SkillLibrary) -> list[Tool]:
              obj({"profile": {"type": "string", "minLength": 40, "maxLength": 6000}}), "internal", _voice_profile,
              remembers=True),
         Tool("set_profile", "Save the user's profile when they introduce themselves.",
-             obj({"name": {"type": "string"}, "handles": {"type": "string"}, "context": {"type": "string"}}),
+             obj({"name": {"type": "string"}, "handles": {"type": "string"}, "context": {"type": "string"}},
+                 required=["name", "context"]),
              "internal", _profile, remembers=True),
         Tool("capabilities", "List what you can and cannot do right now, given the user's connected accounts. "
              "Check it before promising anything that needs an account.", obj({}), "read", _capabilities),

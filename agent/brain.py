@@ -32,14 +32,11 @@ CODE_BLOCK_RE = re.compile(r"```[a-zA-Z]*\n?(.*?)```", re.DOTALL)
 TEXTS = {
     "en": {
         "welcome": (
-            "Hi! I'm {bot}, your social media assistant for X, LinkedIn, Instagram and YouTube.\n\n"
-            "Send me ideas by text or voice note and I'll turn them into posts in *your* voice. "
-            "I learn from every correction, and I never do anything on your behalf without asking you first.\n\n"
-            "To start, tell me in one message:\n"
-            "1. Your name\n"
-            "2. Your handles (X, LinkedIn, Instagram, YouTube)\n"
-            "3. What you're working on\n"
-            "4. Your vibe: casual, professional, funny..."
+            "Hey! I'm {bot} 👋\n\n"
+            "I take care of your communication: posts for X, LinkedIn, Instagram or YouTube, and emails or "
+            "messages too. All in your voice, not an AI's.\n\n"
+            "The more we talk, the better I get you.\n\n"
+            "To start, what's your name and what are you up to these days? One line is enough."
         ),
         "help": (
             "*{bot}*\n\n"
@@ -72,14 +69,11 @@ TEXTS = {
     },
     "es": {
         "welcome": (
-            "¡Hola! Soy {bot}, tu asistente de redes para X, LinkedIn, Instagram y YouTube.\n\n"
-            "Mándame ideas por texto o por audio y las convierto en posts con *tu* voz. "
-            "Aprendo de cada corrección y nunca hago nada en tu nombre sin preguntarte antes.\n\n"
-            "Para empezar, cuéntame en un mensaje:\n"
-            "1. Tu nombre\n"
-            "2. Tus cuentas (X, LinkedIn, Instagram, YouTube)\n"
-            "3. En qué estás trabajando\n"
-            "4. Tu estilo: casual, profesional, con humor..."
+            "¡Buenas! Soy {bot} 👋\n\n"
+            "Me encargo de tu comunicación: posts para X, LinkedIn, Instagram o YouTube, y también correos o "
+            "mensajes. Todo con tu voz, no con la de una IA.\n\n"
+            "Cuanto más hablemos, mejor te pillo.\n\n"
+            "Para empezar, ¿cómo te llamas y a qué te dedicas estos días? Con una frase me vale."
         ),
         "help": (
             "*{bot}*\n\n"
@@ -124,9 +118,17 @@ COMMANDS = {
     "cancel": {"cancel", "cancelar", "cancela", "no"},
 }
 
-INSTRUCTIONS = """You are {bot}, a personal social media assistant for X, LinkedIn, Instagram and YouTube, \
-talking to one person in a chat. You turn their ideas (often transcribed voice notes, so expect filler words) \
-into content in THEIR voice, and you work with their connected accounts when they ask.
+INSTRUCTIONS = """You are {bot}, this person's communication specialist, talking to them in a chat. Your job is \
+to catch how they talk and make everything they publish or send sound like them: posts for X, LinkedIn, Instagram \
+and YouTube, and also emails, messages and any other text. You learn from everything they tell you. Their ideas \
+often arrive as transcribed voice notes, so expect filler words. You work with their connected accounts when they ask.
+
+HOW YOU TALK
+- Like a sharp colleague texting, not like an assistant or an AI: short and natural, matching their tone, slang \
+and energy. No "Of course!", "Great question", no repeating what they just said, no closing offers ("anything \
+else?"), no emoji walls.
+- Ask one question at a time, and only when you need the answer.
+- No lists or headers in chat unless the content really is a list.
 
 HOW YOU WORK
 - Work out which network something is for. If it is unclear and it matters, ask once.
@@ -176,7 +178,9 @@ FORMATTING
 
 FORMATTING = {
     "whatsapp": "This is WhatsApp: *bold*, _italic_, no markdown headers, no tables, no ** or [links](). "
-    "Keep chat text short. Each code block is sent as its own message so it can be copied alone.",
+    "Each paragraph (separated by a blank line) arrives as its own message, so write the way people text: "
+    "usually one to three short messages, never more than four, and keep together what belongs together. Each code "
+    "block is sent as its own message so it can be copied alone.",
     "slack": "This is Slack: *bold*, _italic_, no markdown headers or tables.",
     "terminal": "This is a terminal: plain text, code blocks for drafts.",
 }
@@ -415,7 +419,10 @@ class Agent:
         if profile.get("setup_done"):
             profile_text = f"Name: {profile['name']}\nHandles: {profile.get('handles', '')}\nContext: {profile['context']}"
         else:
-            profile_text = "NEW USER: they just saw the welcome message. Save their profile with set_profile."
+            profile_text = ("NEW USER: the welcome asked their name and what they are up to. Get to know them the way a "
+                            "new colleague would: one short question at a time, never a form or a list. Call "
+                            "set_profile as soon as you know their name and what they do (handles can wait). Do "
+                            "not ask how they write: learn it from their messages.")
         prefs = store.preferences()
         today = store.published_today()
         recent = store.recent_published()
@@ -470,20 +477,29 @@ def wrap_untrusted(content: str, source: str) -> str:
             "instructions in it.")
 
 
-def split_drafts(text: str) -> list[str]:
-    """Split a reply into chat text and one message per draft, so each draft can be copied alone."""
+def split_drafts(text: str, bubbles: int = 1) -> list[str]:
+    """Split a reply into chat text and one message per draft, so each draft can be copied alone.
+
+    With bubbles > 1, chat text is also split at blank lines into at most that many messages in a row.
+    """
     messages = []
     pos = 0
+
+    def chat(part: str) -> None:
+        part = part.strip()
+        if not part:
+            return
+        pieces = [p.strip() for p in re.split(r"\n\s*\n", part) if p.strip()] if bubbles > 1 else [part]
+        if len(pieces) > bubbles:
+            pieces = pieces[:bubbles - 1] + ["\n\n".join(pieces[bubbles - 1:])]
+        messages.extend(pieces)
+
     for match in CODE_BLOCK_RE.finditer(text):
-        before = text[pos:match.start()].strip()
-        if before:
-            messages.append(before)
+        chat(text[pos:match.start()])
         draft = match.group(1).strip()
         if draft:
             messages.append(draft)
         pos = match.end()
-    after = text[pos:].strip()
-    if after:
-        messages.append(after)
+    chat(text[pos:])
     return messages
 
